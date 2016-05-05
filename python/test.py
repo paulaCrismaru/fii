@@ -7,6 +7,7 @@ from tempest import test
 from tempest import exceptions
 # from tempest.common.utils.linux import remote_client
 from tempest.common import waiters
+import time
 
 CONF = config.CONF
 
@@ -17,11 +18,14 @@ class TestNew(manager.ScenarioTest):
     """Demo test for LIS training."""
 
     def setUp(self):
-        self.image = CONF.image.hypervisor_name
-        if self.image is None:
-            raise exceptions("no hypervisor_name")
-        elif self.image != "kvm" or self.image != "hyperv":
-            raise exceptions("no hyperv or kvm")
+        super(TestNew, self).setUp()
+        try:
+            self.hypervisor = CONF.image.hypervisor_name
+        except:
+            raise exceptions.TempestException("no hypervisor_name")
+        if self.image != "kvm" or self.image != "hyperv":
+            raise exceptions.TempestException("no hyperv or kvm")
+        self.image = CONF.compute.image_ref
         self.user = CONF.validation.image_ssh_user
 
     def create_and_add_security_group_to_server(self, server):
@@ -51,13 +55,17 @@ class TestNew(manager.ScenarioTest):
         vm1 = self.create_server(image_id=self.image,
                                  key_name=keypair['name'],
                                  wait_until='ACTIVE')
+        self.addCleanup(self.servers_client.delete_server, vm1['id'])
+        time.sleep(10)
 
         vm2 = self.create_server(image_id=self.image,
-                                 keyname=keypair['name'],
+                                 key_name=keypair['name'],
                                  wait_until='ACTIVE')
 
+        self.addCleanup(self.servers_client.delete_server, vm2['id'])
+        time.sleep(10)
         floating_ip1 = self.create_floating_ip(vm1)
-        floating_ip2 = self.create_floating_ip(vm1)
+        floating_ip2 = self.create_floating_ip(vm2)
 
         self.create_and_add_security_group_to_server(vm1)
         self.create_and_add_security_group_to_server(vm2)
@@ -65,10 +73,10 @@ class TestNew(manager.ScenarioTest):
         self.linux_client = self.get_remote_client(
             floating_ip1['ip'], private_key=keypair['private_key'])
 
-        self.linux_client.ping_host(floating_ip2, 5)
-        result = self.linux_client.exec_command("echo $?")
-        if result != 0:
-            raise exceptions("cannot ping between vms")
+        try:
+            self.linux_client.ping_host(floating_ip2['ip'], 5)
+        except:
+            raise exceptions.TempestException("cannot ping between vms")
 
         self.servers_client.pause_server(vm1['id'])
         waiters.wait_for_server_status(self.servers_client, vm1['id'],
@@ -81,7 +89,10 @@ class TestNew(manager.ScenarioTest):
         waiters.wait_for_server_status(self.servers_client, vm2['id'],
                                        'ACTIVE')
 
-        self.linux_client.ping_host(floating_ip2, 5)
-        result = self.linux_client.exec_command("echo $?")
-        if result != 0:
-            raise exceptions("cannot ping between vms after reboot/pause")
+        self.linux_client = self.get_remote_client(
+            floating_ip1['ip'], private_key=keypair['private_key'])
+        try:
+            self.linux_client.ping_host(floating_ip2['ip'], 5)
+        except:
+        	raise exceptions.TempestException("cannot ping between vms after \
+                                               pause/unpause and reboot")
